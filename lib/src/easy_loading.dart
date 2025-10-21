@@ -196,6 +196,8 @@ class EasyLoading {
   GlobalKey<EasyLoadingContainerState>? _key;
   GlobalKey<EasyLoadingProgressState>? _progressKey;
   Timer? _timer;
+  Timer? _dismissTimer;
+  bool _isDismissing = false;
 
   Widget? get w => _w;
   GlobalKey<EasyLoadingContainerState>? get key => _key;
@@ -203,6 +205,9 @@ class EasyLoading {
 
   final List<EasyLoadingStatusCallback> _statusCallbacks =
       <EasyLoadingStatusCallback>[];
+
+  /// minimum display duration to prevent flicker, default 300ms.
+  Duration minimumDismissDuration = const Duration(milliseconds: 300);
 
   factory EasyLoading() => _instance;
   static final EasyLoading _instance = EasyLoading._internal();
@@ -390,7 +395,7 @@ class EasyLoading {
   }) {
     // cancel timer
     _instance._cancelTimer();
-    return _instance._dismiss(animation);
+    return _instance._dismissWithDelay(animation);
   }
 
   /// add loading status callback
@@ -456,10 +461,37 @@ class EasyLoading {
       );
     }
 
+    // Cancel pending dismiss to prevent flicker
+    _cancelDismissTimer();
+    _isDismissing = false;
+
     toastPosition ??= EasyLoadingToastPosition.center;
+
+    // If loading is already showing, try to update it instead of recreating
+    if (_w != null && _key != null && _key?.currentState != null) {
+      // Check if we can just update the existing loading
+      bool canUpdate = w != null && _progressKey == null;
+
+      if (canUpdate && status != null) {
+        // Just update the status text without recreating the widget
+        _key?.currentState?.updateStatus(status);
+        _cancelTimer();
+        if (duration != null) {
+          _timer = Timer(duration, () async {
+            await dismiss();
+          });
+        }
+        return;
+      }
+    }
+
     bool animation = _w == null;
     _progressKey = null;
-    if (_key != null) await dismiss(animation: false);
+
+    // Only dismiss if really needed (different widget type)
+    if (_key != null && _w != null) {
+      await _dismiss(false);
+    }
 
     Completer<void> completer = Completer<void>();
     _key = GlobalKey<EasyLoadingContainerState>();
@@ -486,6 +518,33 @@ class EasyLoading {
     return completer.future;
   }
 
+  Future<void> _dismissWithDelay(bool animation) async {
+    if (_isDismissing) return;
+
+    // If there's no widget to dismiss, return immediately
+    if (_w == null) return;
+
+    _isDismissing = true;
+
+    // Add a delay to prevent flicker when show is called immediately after dismiss
+    _cancelDismissTimer();
+    final completer = Completer<void>();
+
+    _dismissTimer = Timer(minimumDismissDuration, () async {
+      // Double check if still need to dismiss (show might have been called)
+      if (_isDismissing && _w != null) {
+        await _dismiss(animation);
+      } else {
+        _isDismissing = false;
+      }
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    });
+
+    return completer.future;
+  }
+
   Future<void> _dismiss(bool animation) async {
     if (key != null && key?.currentState == null) {
       _reset();
@@ -501,7 +560,9 @@ class EasyLoading {
     _w = null;
     _key = null;
     _progressKey = null;
+    _isDismissing = false;
     _cancelTimer();
+    _cancelDismissTimer();
     _markNeedsBuild();
     _callback(EasyLoadingStatus.dismiss);
   }
@@ -519,5 +580,10 @@ class EasyLoading {
   void _cancelTimer() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  void _cancelDismissTimer() {
+    _dismissTimer?.cancel();
+    _dismissTimer = null;
   }
 }
