@@ -206,8 +206,8 @@ class EasyLoading {
   final List<EasyLoadingStatusCallback> _statusCallbacks =
       <EasyLoadingStatusCallback>[];
 
-  /// minimum display duration to prevent flicker, default 300ms.
-  Duration minimumDismissDuration = const Duration(milliseconds: 300);
+  /// minimum display duration to prevent flicker, default 400ms.
+  Duration minimumDismissDuration = const Duration(milliseconds: 400);
 
   factory EasyLoading() => _instance;
   static final EasyLoading _instance = EasyLoading._internal();
@@ -467,15 +467,14 @@ class EasyLoading {
 
     toastPosition ??= EasyLoadingToastPosition.center;
 
-    // If loading is already showing, try to update it instead of recreating
-    if (_w != null && _key != null && _key?.currentState != null) {
-      // Check if we can just update the existing loading
-      bool canUpdate = w != null && _progressKey == null;
-
-      if (canUpdate && status != null) {
-        // Just update the status text without recreating the widget
+    // If loading is already showing, keep it and just refresh
+    if (_w != null && _key != null) {
+      // Cancel any existing timer
+      _cancelTimer();
+      
+      // If we can update the status, do it without recreating
+      if (status != null && _key?.currentState != null && _progressKey == null) {
         _key?.currentState?.updateStatus(status);
-        _cancelTimer();
         if (duration != null) {
           _timer = Timer(duration, () async {
             await dismiss();
@@ -483,15 +482,19 @@ class EasyLoading {
         }
         return;
       }
+      
+      // Otherwise, just keep showing without animation
+      // Don't dismiss and recreate - this causes flicker
+      if (duration != null) {
+        _timer = Timer(duration, () async {
+          await dismiss();
+        });
+      }
+      return;
     }
 
     bool animation = _w == null;
     _progressKey = null;
-
-    // Only dismiss if really needed (different widget type)
-    if (_key != null && _w != null) {
-      await _dismiss(false);
-    }
 
     Completer<void> completer = Completer<void>();
     _key = GlobalKey<EasyLoadingContainerState>();
