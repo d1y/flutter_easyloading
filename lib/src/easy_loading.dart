@@ -197,6 +197,10 @@ class EasyLoading {
   GlobalKey<EasyLoadingProgressState>? _progressKey;
   Timer? _timer;
   int _showCount = 0; // Reference counter for show/dismiss calls
+  
+  // Cache last show parameters to detect changes
+  EasyLoadingToastPosition? _lastToastPosition;
+  EasyLoadingMaskType? _lastMaskType;
 
   Widget? get w => _w;
   GlobalKey<EasyLoadingContainerState>? get key => _key;
@@ -391,17 +395,17 @@ class EasyLoading {
   }) {
     // cancel timer
     _instance._cancelTimer();
-    
+
     // Decrease reference counter
     if (_instance._showCount > 0) {
       _instance._showCount--;
     }
-    
+
     // Only dismiss when counter reaches 0
     if (_instance._showCount == 0) {
       return _instance._dismiss(animation);
     }
-    
+
     return Future.value();
   }
 
@@ -469,20 +473,26 @@ class EasyLoading {
     }
 
     toastPosition ??= EasyLoadingToastPosition.center;
-    
+
     // Increase reference counter
     _showCount++;
 
-    // If loading is already showing, keep it and just refresh
-    if (_w != null && _key != null) {
+    // Check if parameters changed - if so, need to recreate
+    bool parametersChanged = _w != null &&
+        (_lastToastPosition != toastPosition || _lastMaskType != maskType);
+
+    // If loading is already showing and parameters haven't changed, keep it
+    if (_w != null && _key != null && !parametersChanged) {
       // Cancel any existing timer
       _cancelTimer();
-      
+
       // If we can update the status, do it without recreating
-      if (status != null && _key?.currentState != null && _progressKey == null) {
+      if (status != null &&
+          _key?.currentState != null &&
+          _progressKey == null) {
         _key?.currentState?.updateStatus(status);
       }
-      
+
       if (duration != null) {
         _timer = Timer(duration, () async {
           await dismiss();
@@ -490,9 +500,18 @@ class EasyLoading {
       }
       return;
     }
+    
+    // If parameters changed, need to recreate
+    if (parametersChanged) {
+      await _dismiss(false);
+    }
 
     bool animation = _w == null;
     _progressKey = null;
+
+    // Save current parameters
+    _lastToastPosition = toastPosition;
+    _lastMaskType = maskType;
 
     Completer<void> completer = Completer<void>();
     _key = GlobalKey<EasyLoadingContainerState>();
@@ -535,6 +554,8 @@ class EasyLoading {
     _key = null;
     _progressKey = null;
     _showCount = 0; // Reset reference counter
+    _lastToastPosition = null;
+    _lastMaskType = null;
     _cancelTimer();
     _markNeedsBuild();
     _callback(EasyLoadingStatus.dismiss);
